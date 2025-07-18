@@ -1,2 +1,2 @@
 # trading-signal
-Signalbot TG dengan analisa Ai dan news assistant
+Signalbot TG with Ai analysis dan news assistant
