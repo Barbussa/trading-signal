@@ -1,19 +1,21 @@
 {
-  "name": "trading-signal",
+  "name": "trading-bot",
   "version": "1.0.0",
-  "description": "Bot trading dengan AI",
+  "description": "Bot Trading Crypto & Komoditas",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon bot.js"
   },
-  "keywords": [],
-  "author": "Anda",
-  "license": "ISC",
   "dependencies": {
-    "@tensorflow/tfjs": "^4.10.0",
-    "node-telegram-bot-api": "^0.61.0",
+    "node-telegram-bot-api": "^0.66.0",
     "axios": "^1.6.7",
-    "natural": "^5.2.4"
+    "@tensorflow/tfjs": "^4.10.0",
+    "technicalindicators": "^3.1.0",
+    "natural": "^5.2.4",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   }
 }
