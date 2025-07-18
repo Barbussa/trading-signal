@@ -1,31 +1,19 @@
 {
-  "name": "trading-signal-bot",
-  "version": "2.0.0",
-  "description": "Bot trading crypto & komoditas dengan AI",
+  "name": "trading-bot",
+  "version": "3.0.0",
+  "description": "Bot Trading Crypto & Komoditas",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "dev": "nodemon bot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon bot.js"
   },
   "dependencies": {
-    // CORE
-    "node-telegram-bot-api": "^0.66.0",  // Versi terbaru (fix vulnerability)
-    "axios": "^1.6.7",                    // Pengganti 'request'
-    
-    // AI & ANALISIS
-    "@tensorflow/tfjs": "^4.10.0",        // CPU-only (cocok untuk Termux)
-    "technicalindicators": "^3.1.0",       // Analisis teknikal
-    
-    // UTILITIES
-    "natural": "^5.2.4",                  // NLP untuk analisis sentimen
-    "node-cache": "^5.1.2",               // Cache data
-    "dotenv": "^16.3.1"                   // Environment variables
+    "node-telegram-bot-api": "^0.66.0",
+    "axios": "^1.6.7",
+    "technicalindicators": "^3.1.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"                   // Auto-restart saat development
-  },
-  "keywords": ["trading", "crypto", "bot", "telegram"],
-  "author": "Anda",
-  "license": "ISC"
+    "nodemon": "^3.0.2"
+  }
 }
