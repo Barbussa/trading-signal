@@ -2,6 +2,7 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const WebSocket = require('ws');
 const { RSI } = require('technicalindicators');
+const fetch = require('node-fetch');
 
 // Setup Telegram Bot
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
@@ -9,12 +10,11 @@ const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 // Market data storage
 const marketData = {
   btc: { price: 0, rsi: 0, trend: 'sideways', closes: [] },
-  xau: { price: 0, rsi: 0, trend: 'sideways', closes: [] }
+  gold: { price: 0, lastUpdated: null }  // New structure for gold data
 };
 
-// Initialize WebSocket connections
+// Initialize WebSocket connection for BTC
 const btcWs = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
-const xauWs = new WebSocket('wss://stream.binance.com:9443/ws/xauusdt@ticker');
 
 // Handle BTC/USDT WebSocket
 btcWs.on('message', (data) => {
@@ -48,61 +48,101 @@ btcWs.on('message', (data) => {
   }
 });
 
-// Handle XAU/USD WebSocket (Gold)
-xauWs.on('message', (data) => {
-  try {
-    const ticker = JSON.parse(data);
-    const currentPrice = parseFloat(ticker.c);
-    
-    // Update price
-    marketData.xau.price = currentPrice;
-    
-    // Update closes array for RSI
-    marketData.xau.closes.push(currentPrice);
-    if (marketData.xau.closes.length > 14) {
-      marketData.xau.closes.shift();
-    }
-    
-    // Calculate RSI
-    if (marketData.xau.closes.length === 14) {
-      marketData.xau.rsi = RSI.calculate({
-        values: marketData.xau.closes,
-        period: 14
-      }).pop();
-      
-      marketData.xau.trend = currentPrice > marketData.xau.closes[12] ? 'up' : 'down';
-    }
-    
-    console.log(`XAU Updated: $${currentPrice} | RSI: ${marketData.xau.rsi}`);
-  } catch (error) {
-    console.error('XAU WS Error:', error);
-  }
-});
+// Function to fetch gold price from GoldAPI
+async function getGoldPrice() {
+  const myHeaders = new Headers();
+  myHeaders.append("x-access-token", process.env.GOLDAPI_TOKEN || "goldapi-5wcsmda5ki4h-io");
+  myHeaders.append("Content-Type", "application/json");
 
-// Handle WebSocket errors
-btcWs.on('error', (error) => console.error('BTC WS Error:', error));
-xauWs.on('error', (error) => console.error('XAU WS Error:', error));
+  try {
+    const response = await fetch("https://www.goldapi.io/api/XAU/USD", {
+      method: 'GET',
+      headers: myHeaders,
+      redirect: 'follow'
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    return {
+      price: result.price,
+      timestamp: result.timestamp
+    };
+  } catch (error) {
+    console.error('Error fetching gold price:', error);
+    return null;
+  }
+}
+
+// Auto-update gold price
+async function updateGoldPrice() {
+  const goldData = await getGoldPrice();
+  if (goldData) {
+    marketData.gold.price = goldData.price;
+    marketData.gold.lastUpdated = new Date(goldData.timestamp * 1000);
+    console.log(`XAU/USD Updated: $${goldData.price}`);
+  } else {
+    console.log('Using cached gold data due to API error');
+  }
+  
+  setTimeout(updateGoldPrice, 60000); // Update every 1 minute
+}
+
+// Start gold price updates
+updateGoldPrice();
 
 // Command handlers
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
     `💎 *BOT TRADING REAL-TIME* 💎\n\n` +
-    `📊 Data langsung dari Binance WebSocket\n` +
-    `📌 Perintah:\n` +
-    `/btc - Analisis Bitcoin\n` +
-    `/xau - Analisis Emas\n\n` +
-    `🔄 Update otomatis setiap detik`,
+    `📊 Data Sources:\n` +
+    `- BTC/USDT: Binance WebSocket\n` +
+    `- XAU/USD: GoldAPI.io\n\n` +
+    `📌 Commands:\n` +
+    `/btc - Bitcoin Analysis\n` +
+    `/gold - Gold Price\n\n` +
+    `🔄 Auto-update every minute`,
     { parse_mode: 'Markdown' }
   );
 });
 
+// BTC Command
+bot.onText(/\/btc/, (msg) => {
+  const { price, rsi, signal } = getMarketAnalysis('btc');
+  bot.sendMessage(
+    msg.chat.id,
+    `📊 *BITCOIN (BTC/USDT)*\n\n` +
+    `💰 Price: ${price}\n` +
+    `📈 RSI(14): ${rsi}\n` +
+    `🎯 Signal: ${signal}\n\n` +
+    `⏱ Updated: ${new Date().toLocaleTimeString()}`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// Gold Command
+bot.onText(/\/gold/, (msg) => {
+  const { price, time } = getGoldAnalysis();
+  bot.sendMessage(
+    msg.chat.id,
+    `📊 *GOLD (XAU/USD)*\n\n` +
+    `💰 Price: $${price}\n` +
+    `🕒 Last Updated: ${time}\n\n` +
+    `📌 Source: GoldAPI.io`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// Helper functions
 function getMarketAnalysis(symbol) {
   const data = marketData[symbol];
-  let signal = '🔄 TUNGGU';
+  let signal = '🔄 WAIT';
   
-  if (data.rsi < 30 && data.trend === 'up') signal = '🚀 BELI';
-  if (data.rsi > 70 && data.trend === 'down') signal = '⚠️ JUAL';
+  if (data.rsi < 30 && data.trend === 'up') signal = '🚀 BUY';
+  if (data.rsi > 70 && data.trend === 'down') signal = '⚠️ SELL';
   
   return {
     price: data.price.toLocaleString('en-US', { style: 'currency', currency: 'USD' }),
@@ -111,30 +151,11 @@ function getMarketAnalysis(symbol) {
   };
 }
 
-bot.onText(/\/btc/, (msg) => {
-  const { price, rsi, signal } = getMarketAnalysis('btc');
-  bot.sendMessage(
-    msg.chat.id,
-    `📊 *BITCOIN (BTC/USDT)*\n\n` +
-    `💰 Harga: ${price}\n` +
-    `📈 RSI(14): ${rsi}\n` +
-    `🎯 Sinyal: ${signal}\n\n` +
-    `⏱ Update: ${new Date().toLocaleTimeString()}`,
-    { parse_mode: 'Markdown' }
-  );
-});
+function getGoldAnalysis() {
+  return {
+    price: marketData.gold.price ? marketData.gold.price.toFixed(2) : 'N/A',
+    time: marketData.gold.lastUpdated ? marketData.gold.lastUpdated.toLocaleTimeString() : 'Unknown'
+  };
+}
 
-bot.onText(/\/xau/, (msg) => {
-  const { price, rsi, signal } = getMarketAnalysis('xau');
-  bot.sendMessage(
-    msg.chat.id,
-    `📊 *EMAS (XAU/USD)*\n\n` +
-    `💰 Harga: ${price}\n` +
-    `📈 RSI(14): ${rsi}\n` +
-    `🎯 Sinyal: ${signal}\n\n` +
-    `⏱ Update: ${new Date().toLocaleTimeString()}`,
-    { parse_mode: 'Markdown' }
-  );
-});
-
-console.log('🤖 Bot aktif! Gunakan /start di Telegram');
+console.log('🤖 Bot is running! Use /start in Telegram');
