@@ -1,85 +1,118 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-const ccxt = require('ccxt');
+const WebSocket = require('ws');
 const { RSI } = require('technicalindicators');
 
-// Setup Bot
+// Setup Telegram Bot
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 
-// Initialize exchange
-const exchange = new ccxt.binance();
-
-// Market data cache
+// Market data storage
 const marketData = {
-  btc: { price: 0, rsi: 0, trend: 'sideways' },
-  xau: { price: 0, rsi: 0, trend: 'sideways' }
+  btc: { price: 0, rsi: 0, trend: 'sideways', closes: [] },
+  xau: { price: 0, rsi: 0, trend: 'sideways', closes: [] }
 };
 
-// Function to get real-time data with RSI
-async function getRealTimeData(symbol, pair) {
+// Initialize WebSocket connections
+const btcWs = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+const xauWs = new WebSocket('wss://stream.binance.com:9443/ws/xauusdt@ticker');
+
+// Handle BTC/USDT WebSocket
+btcWs.on('message', (data) => {
   try {
-    const candles = await exchange.fetchOHLCV(symbol, '15m', undefined, 14);
-    const closes = candles.map(c => c[4]);
-    const rsi = RSI.calculate({ values: closes, period: 14 }).pop();
-    const currentPrice = candles[candles.length - 1][4];
+    const ticker = JSON.parse(data);
+    const currentPrice = parseFloat(ticker.c);
     
-    // Determine trend
-    const trend = currentPrice > candles[candles.length - 2][4] ? 'up' : 'down';
+    // Update price
+    marketData.btc.price = currentPrice;
     
-    // Update market data
-    marketData[pair] = {
-      price: currentPrice,
-      rsi: Math.round(rsi * 100) / 100,
-      trend
-    };
+    // Update closes array for RSI (last 14 periods)
+    marketData.btc.closes.push(currentPrice);
+    if (marketData.btc.closes.length > 14) {
+      marketData.btc.closes.shift();
+    }
     
-    console.log(`Updated ${pair} data:`, marketData[pair]);
+    // Calculate RSI if we have enough data
+    if (marketData.btc.closes.length === 14) {
+      marketData.btc.rsi = RSI.calculate({
+        values: marketData.btc.closes,
+        period: 14
+      }).pop();
+      
+      // Determine trend
+      marketData.btc.trend = currentPrice > marketData.btc.closes[12] ? 'up' : 'down';
+    }
+    
+    console.log(`BTC Updated: $${currentPrice} | RSI: ${marketData.btc.rsi}`);
   } catch (error) {
-    console.error(`Error fetching ${pair} data:`, error.message);
+    console.error('BTC WS Error:', error);
   }
-}
+});
 
-// Auto-update market data every 30 seconds
-async function updateMarketData() {
-  await getRealTimeData('BTC/USDT', 'btc');
-  await getRealTimeData('XAU/USD', 'xau');
-  setTimeout(updateMarketData, 30000);
-}
+// Handle XAU/USD WebSocket (Gold)
+xauWs.on('message', (data) => {
+  try {
+    const ticker = JSON.parse(data);
+    const currentPrice = parseFloat(ticker.c);
+    
+    // Update price
+    marketData.xau.price = currentPrice;
+    
+    // Update closes array for RSI
+    marketData.xau.closes.push(currentPrice);
+    if (marketData.xau.closes.length > 14) {
+      marketData.xau.closes.shift();
+    }
+    
+    // Calculate RSI
+    if (marketData.xau.closes.length === 14) {
+      marketData.xau.rsi = RSI.calculate({
+        values: marketData.xau.closes,
+        period: 14
+      }).pop();
+      
+      marketData.xau.trend = currentPrice > marketData.xau.closes[12] ? 'up' : 'down';
+    }
+    
+    console.log(`XAU Updated: $${currentPrice} | RSI: ${marketData.xau.rsi}`);
+  } catch (error) {
+    console.error('XAU WS Error:', error);
+  }
+});
 
-// Initial data fetch
-updateMarketData();
+// Handle WebSocket errors
+btcWs.on('error', (error) => console.error('BTC WS Error:', error));
+xauWs.on('error', (error) => console.error('XAU WS Error:', error));
 
-// Command /start
+// Command handlers
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `💎 *BOT TRADING READY* 💎\n\n` +
-    `📌 Fitur:\n` +
+    `💎 *BOT TRADING REAL-TIME* 💎\n\n` +
+    `📊 Data langsung dari Binance WebSocket\n` +
+    `📌 Perintah:\n` +
     `/btc - Analisis Bitcoin\n` +
-    `/xau - Analisis Emas (XAU/USD)\n\n` +
-    `🛠 By: @username`,
+    `/xau - Analisis Emas\n\n` +
+    `🔄 Update otomatis setiap detik`,
     { parse_mode: 'Markdown' }
   );
 });
 
-// Analyze market function
-function analyzeMarket(pair) {
-  const data = marketData[pair];
-  
+function getMarketAnalysis(symbol) {
+  const data = marketData[symbol];
   let signal = '🔄 TUNGGU';
+  
   if (data.rsi < 30 && data.trend === 'up') signal = '🚀 BELI';
   if (data.rsi > 70 && data.trend === 'down') signal = '⚠️ JUAL';
-
+  
   return {
     price: data.price.toLocaleString('en-US', { style: 'currency', currency: 'USD' }),
-    rsi: data.rsi,
+    rsi: data.rsi ? data.rsi.toFixed(2) : 'Calculating...',
     signal
   };
 }
 
-// Handler Command /btc
-bot.onText(/\/btc/, async (msg) => {
-  const { price, rsi, signal } = analyzeMarket('btc');
+bot.onText(/\/btc/, (msg) => {
+  const { price, rsi, signal } = getMarketAnalysis('btc');
   bot.sendMessage(
     msg.chat.id,
     `📊 *BITCOIN (BTC/USDT)*\n\n` +
@@ -91,9 +124,8 @@ bot.onText(/\/btc/, async (msg) => {
   );
 });
 
-// Handler Command /xau
-bot.onText(/\/xau/, async (msg) => {
-  const { price, rsi, signal } = analyzeMarket('xau');
+bot.onText(/\/xau/, (msg) => {
+  const { price, rsi, signal } = getMarketAnalysis('xau');
   bot.sendMessage(
     msg.chat.id,
     `📊 *EMAS (XAU/USD)*\n\n` +
